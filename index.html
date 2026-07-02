@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مدیریت اعضا - پنل اکسل</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary: #217346;
+            --orange-highlight: #ffe8cc;
+            --blue-highlight: #e7f5ff;
+            --special-highlight: #ffeeba;
+            --dark-blue: #339af0; 
+            --light-blue: #a5d8ff; 
+            --light-green: #d3f9d8; 
+        }
+
+        body { font-family: Tahoma, Arial, sans-serif; background: #f4f7f6; margin: 0; padding: 15px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 10px; flex-wrap: wrap; }
+        .tab-btn { border: none; padding: 10px 20px; cursor: pointer; background: #ddd; border-radius: 5px; font-weight: bold; }
+        .tab-btn.active { background: var(--primary); color: white; }
+        .back-link { display: inline-block; margin-bottom: 15px; padding: 8px 15px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; font-size: 13px; cursor: pointer; border: none; }
+        .table-container { overflow-x: auto; border: 1px solid #eee; }
+        table { width: 100%; border-collapse: collapse; direction: rtl; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; white-space: nowrap; }
+        th { background: #f8f9fa; position: sticky; top: 0; }
+        .goto-btn { background: #007bff; color: white; border: none; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+        
+        .row-orange-highlight { background-color: var(--orange-highlight) !important; }
+        .row-blue-highlight { background-color: var(--blue-highlight) !important; }
+        .highlight-special { background-color: var(--special-highlight) !important; font-weight: bold; }
+        .bg-dark-blue { background-color: var(--dark-blue) !important; color: white; }
+        .bg-light-blue { background-color: var(--light-blue) !important; }
+        .bg-light-green { background-color: var(--light-green) !important; }
+
+        .loading { text-align: center; color: #666; padding: 50px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="status" class="loading">در حال بارگذاری اطلاعات...</div>
+    
+    <div id="info-header" class="header-bar" style="display:none;">
+        <span id="update-date-display">آخرین به روزرسانی: در حال محاسبه...</span>
+    </div>
+
+    <div id="tabs-container" class="nav-bar" style="display:none;"></div>
+    <div id="back-area"></div>
+    <div class="table-container" id="content-viewer"></div>
+</div>
+
+<script>
+    const EXCEL_FILE = 'data.xlsm';
+    const MAIN_SHEETS = ['member', 'bank', 'cash', 'loan', 'temp2'];
+    let workbook = null;
+    let lastUpdatedDate = "یافت نشد";
+
+    async function init() {
+        try {
+            const response = await fetch(`${EXCEL_FILE}?t=${new Date().getTime()}`);
+            if (!response.ok) throw new Error("فایل اکسل یافت نشد.");
+            const data = await response.arrayBuffer();
+            
+            // اضافه کردن cellNF: true برای خواندن فرمت‌های عددی و تاریخ
+            workbook = XLSX.read(data, { type: 'array', cellNF: true, cellText: true, cellDates: true });
+            
+            extractMaxDateFromBank();
+
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('info-header').style.display = 'flex';
+            document.getElementById('tabs-container').style.display = 'flex';
+            
+            renderMainTabs();
+            loadSheet('member');
+        } catch (error) {
+            document.getElementById('status').innerText = "خطا: " + error.message;
+        }
+    }
+
+    function extractMaxDateFromBank() {
+        const sheet = workbook.Sheets['bank'];
+        if (!sheet) return;
+
+        const range = XLSX.utils.decode_range(sheet['!ref']);
+        const colDIndex = 3; // ستون D
+        let foundDates = [];
+
+        for (let r = range.s.r; r <= range.e.r; r++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: r, c: colDIndex });
+            const cell = sheet[cellAddress];
+            
+            if (cell) {
+                // استفاده از cell.w (متن نمایش داده شده در اکسل) یا cell.v (مقدار واقعی)
+                let val = cell.w ? cell.w.trim() : (cell.v ? String(cell.v).trim() : "");
+                
+                // فیلتر کردن مقادیر: نباید کلمه "تاریخ" یا خالی باشد
+                if (val !== "" && val !== "تاریخ" && !isNaN(parseInt(val[0]))) {
+                    foundDates.push(val);
+                }
+            }
+        }
+
+        if (foundDates.length > 0) {
+            // مرتب‌سازی برای پیدا کردن بزرگترین تاریخ (مناسب برای فرمت 1402/01/01)
+            foundDates.sort().reverse();
+            lastUpdatedDate = foundDates[0];
+        }
+        
+        document.getElementById('update-date-display').innerText = `آخرین به روزرسانی: ${lastUpdatedDate}`;
+    }
+
+    // بقیه توابع (renderMainTabs, loadSheet, ...) بدون تغییر مانند قبل هستند
+    function renderMainTabs() {
+        const container = document.getElementById('tabs-container');
+        container.innerHTML = '';
+        MAIN_SHEETS.forEach(name => {
+            if (workbook.SheetNames.includes(name)) {
+                const btn = document.createElement('button');
+                btn.className = 'tab-btn';
+                btn.id = 'btn-' + name;
+                btn.innerText = getFriendlyName(name);
+                btn.onclick = () => loadSheet(name);
+                container.appendChild(btn);
+            }
+        });
+    }
+
+    function getFriendlyName(name) {
+        const names = {'member': 'لیست اعضا', 'bank': 'بانک', 'cash': 'صندوق', 'loan': 'وام', 'temp2': 'موقت'};
+        return names[name] || name;
+    }
+
+    function loadSheet(sheetName) {
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) return;
+
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        if (document.getElementById('btn-' + sheetName)) document.getElementById('btn-' + sheetName).classList.add('active');
+
+        const backArea = document.getElementById('back-area');
+        backArea.innerHTML = sheetName !== 'member' ? `<button class="back-link" onclick="loadSheet('member')">⬅ بازگشت به لیست اعضا (member)</button>` : '';
+
+        let html = XLSX.utils.sheet_to_html(worksheet);
+        document.getElementById('content-viewer').innerHTML = html;
+
+        const table = document.querySelector("#content-viewer table");
+        if (!table) return;
+
+        if (sheetName === 'member') {
+            processMemberLinks();
+            applyAlternatingRange(table, 3, 2, 3);
+        } else if (sheetName === 'bank') {
+            applyBankSpecialHighlights(table);
+            applyAlternatingRange(table, 8, 2, 6);
+        } else if (sheetName === 'cash') {
+            highlightCell(table.rows, 2, 2, 'bg-light-green');
+            applyAlternatingRange(table, 6, 0, 6);
+        } else if (sheetName === 'loan') {
+            applyAlternatingRange(table, 4, 0, 7);
+        } else if (sheetName === 'temp2') {
+            applyAlternatingRange(table, 1, 0, 5);
+        } else {
+            const numVal = parseInt(sheetName);
+            if (numVal >= 11 && numVal <= 35) applyHighlightsToNumericSheet(table);
+        }
+    }
+
+    function processMemberLinks() {
+        const rows = document.querySelector("#content-viewer table").rows;
+        for (let i = 0; i < rows.length; i++) {
+            const cellB = rows[i].cells[1];
+            if (cellB) {
+                const val = cellB.innerText.trim();
+                if (parseInt(val) >= 11 && parseInt(val) <= 35 && workbook.SheetNames.includes(val)) {
+                    cellB.innerHTML = `<button class="goto-btn" onclick="loadSheet('${val}')">نمایش شیت ${val} 🔍</button>`;
+                }
+            }
+        }
+    }
+
+    function applyBankSpecialHighlights(table) {
+        const rows = table.rows;
+        const targetCols = [1, 2, 4, 5]; 
+        if (rows[3]) targetCols.forEach(c => { if(rows[3].cells[c]) rows[3].cells[c].classList.add('bg-dark-blue'); });
+        if (rows[4]) targetCols.forEach(c => { if(rows[4].cells[c]) rows[4].cells[c].classList.add('bg-light-blue'); });
+    }
+
+    function applyAlternatingRange(table, startRowIndex, startColIndex, endColIndex) {
+        const rows = table.rows;
+        let isOrange = true;
+        for (let r = startRowIndex; r < rows.length; r++) {
+            const row = rows[r];
+            if (isRangeEmpty(row, startColIndex, endColIndex)) continue;
+            const cls = isOrange ? 'row-orange-highlight' : 'row-blue-highlight';
+            for (let c = startColIndex; c <= endColIndex; c++) {
+                if (row.cells[c]) row.cells[c].classList.add(cls);
+            }
+            isOrange = !isOrange;
+        }
+    }
+
+    function applyHighlightsToNumericSheet(table) {
+        const rows = table.rows;
+        highlightCell(rows, 0, 1, 'highlight-special');
+        highlightCell(rows, 0, 3, 'highlight-special');
+        highlightCell(rows, 6, 5, 'highlight-special');
+        highlightCell(rows, 6, 6, 'highlight-special');
+        let isOrange = true;
+        for (let r = 9; r < rows.length; r++) {
+            if (isRangeEmpty(rows[r], 0, 6)) continue;
+            const cls = isOrange ? 'row-orange-highlight' : 'row-blue-highlight';
+            for (let c = 0; c <= 6; c++) { if (rows[r].cells[c]) rows[r].cells[c].classList.add(cls); }
+            isOrange = !isOrange;
+        }
+    }
+
+    function highlightCell(rows, rIdx, cIdx, className) {
+        if (rows[rIdx] && rows[rIdx].cells[cIdx]) rows[rIdx].cells[cIdx].classList.add(className);
+    }
+
+    function isRangeEmpty(row, s, e) {
+        for (let c = s; c <= e; c++) { if (row.cells[c] && row.cells[c].innerText.trim() !== "") return false; }
+        return true;
+    }
+
+    init();
+</script>
+
+</body>
+</html>
