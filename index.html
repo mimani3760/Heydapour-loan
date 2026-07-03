@@ -16,9 +16,20 @@
         body { font-family: Tahoma, Arial, sans-serif; background: #f4f7f6; margin: 0; padding: 15px; }
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
         
-        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #e9ecef; border-radius: 5px; font-size: 14px; font-weight: bold; color: #495057; flex-wrap: wrap; gap: 10px; }
-        .header-text { color: #d9534f; }
-        .temp2-text { color: #0c5460; }
+        .header-bar { 
+            display: flex; 
+            flex-direction: column; 
+            margin-bottom: 15px; 
+            padding: 12px 15px; 
+            background: #e9ecef; 
+            border-radius: 5px; 
+            font-size: 14px; 
+            font-weight: bold; 
+            gap: 8px;
+            border-right: 5px solid var(--primary);
+        }
+        .header-line1 { color: #d9534f; }
+        .header-line2 { color: #0c5460; }
         
         .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 10px; flex-wrap: wrap; }
         .tab-btn { border: none; padding: 10px 20px; cursor: pointer; background: #ddd; border-radius: 5px; font-weight: bold; }
@@ -41,10 +52,12 @@
 
 <div class="container">
     <div id="status" class="loading">در حال بارگذاری فایل اطلاعات...</div>
+    
     <div id="info-header" class="header-bar" style="display:none;">
-        <span id="update-date-display">آخرین به روزرسانی: در حال محاسبه...</span>
-        <span id="dynamic-message" class="header-text"></span>
+        <div id="msg-line1" class="header-line1">آخرین به روزرسانی: در حال محاسبه...</div>
+        <div id="msg-line2" class="header-line2">محاسبات امتیاز وام در روز در حال محاسبه...</div>
     </div>
+    
     <div id="tabs-container" class="nav-bar" style="display:none;"></div>
     <div id="back-area"></div>
     <div class="table-container" id="content-viewer"></div>
@@ -54,6 +67,7 @@
     const EXCEL_FILE = 'data.xlsm';
     const MAIN_SHEETS = ['member', 'bank', 'cash', 'loan', 'temp2'];
     let workbook = null;
+    let date = "";
     let we = ""; 
 
     async function init() {
@@ -71,6 +85,7 @@
 
             calculateUpdateDate();
             extractWeVar();
+            updateHeaders();
 
             document.getElementById('status').style.display = 'none';
             document.getElementById('info-header').style.display = 'flex';
@@ -88,20 +103,33 @@
         if (!sheet) return;
         const range = XLSX.utils.decode_range(sheet['!ref']);
         let maxDate = "";
+        
+        // جستجو در ستون D (ایندکس 3) برای پیدا کردن بزرگ‌ترین مقدار تاریخ
         for (let r = range.s.r; r <= range.e.r; r++) {
             const cell = sheet[XLSX.utils.encode_cell({r: r, c: 3})];
             if (cell && cell.w) {
-                if (cell.w > maxDate) maxDate = cell.w;
+                const val = cell.w.trim();
+                if (val !== "" && val !== "تاریخ" && !isNaN(parseInt(val[0]))) {
+                    if (val > maxDate) maxDate = val;
+                }
             }
         }
-        document.getElementById('update-date-display').innerText = `آخرین به روزرسانی: ${maxDate}`;
+        date = maxDate || "نامشخص";
     }
 
     function extractWeVar() {
         const sheet = workbook.Sheets['temp2'];
         if (sheet && sheet['G1']) {
             we = sheet['G1'].w || sheet['G1'].v || "";
+            we = we.toString().trim();
+        } else {
+            we = "نامشخص";
         }
+    }
+
+    function updateHeaders() {
+        document.getElementById('msg-line1').innerText = `آخرین به روزرسانی: ${date} اگر هر تراکنشی بعد از تاریخ بروزرسانی باشد در آپدیت بعدی لحاظ می شود`;
+        document.getElementById('msg-line2').innerText = `محاسبات امتیاز وام در روز ${we} انجام شده است   (قابل نمایش در برگه TEMP2)`;
     }
 
     function renderMainTabs() {
@@ -125,16 +153,6 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('btn-' + sheetName).classList.add('active');
 
-        // پیام داینامیک
-        const msgEl = document.getElementById('dynamic-message');
-        if (sheetName === 'temp2') {
-            msgEl.innerText = `محاسبات امتیاز وام در روز ${we} انجام شده است`;
-            msgEl.className = "temp2-text";
-        } else {
-            msgEl.innerText = "اگر هر تراکنشی بعد از تاریخ بروزرسانی باشد در آپدیت بعدی لحاظ می‌شود";
-            msgEl.className = "header-text";
-        }
-
         // دکمه بازگشت
         const backArea = document.getElementById('back-area');
         backArea.innerHTML = sheetName !== 'member' ? `<button class="back-link" onclick="loadSheet('member')">⬅ بازگشت</button>` : '';
@@ -144,33 +162,33 @@
         document.getElementById('content-viewer').innerHTML = html;
         const table = document.querySelector("#content-viewer table");
 
-        // اعمال منطق اختصاصی هر شیت
+        // اعمال منطق اختصاصی هر شیت و فیلتر ستون‌ها
         if (sheetName === 'member') {
             highlightRowRange(table, 0, 0, 4, 'bg-dark-blue-highlight'); // ردیف 1 تا E
             highlightRowRange(table, 2, 0, 4, 'bg-dark-green-highlight'); // ردیف 3 تا E
-            hideColumnsFrom(table, 5); // ستون F (ایندکس 5) به بعد مخفی
+            hideColumnsFrom(table, 5); // فقط نمایش تا ستون E (ستون 0 تا 4). ستون F (ایندکس 5) به بعد مخفی
         } 
         else if (sheetName === 'bank') {
             highlightRowRange(table, 0, 0, 6, 'bg-dark-blue-highlight'); // ردیف 1 تا G
             highlightRowRange(table, 6, 0, 6, 'bg-dark-green-highlight'); // ردیف 7 تا G
             highlightRowRange(table, 7, 0, 6, 'bg-dark-green-highlight'); // ردیف 8 تا G
-            hideColumnsFrom(table, 7); // ستون H (ایندکس 7) به بعد مخفی
+            hideColumnsFrom(table, 7); // فقط نمایش تا ستون G (ستون 0 تا 6). ستون H (ایندکس 7) به بعد مخفی
         } 
         else if (sheetName === 'cash') {
             highlightRowRange(table, 0, 0, 6, 'bg-dark-blue-highlight'); // ردیف 1 تا G
             highlightRowRange(table, 4, 0, 6, 'bg-dark-green-highlight'); // ردیف 5 تا G
             highlightRowRange(table, 5, 0, 6, 'bg-dark-green-highlight'); // ردیف 6 تا G
-            hideColumnsFrom(table, 7); // ستون H (ایندکس 7) به بعد مخفی
+            hideColumnsFrom(table, 7); // فقط نمایش تا ستون G (ستون 0 تا 6). ستون H (ایندکس 7) به بعد مخفی
         } 
         else if (sheetName === 'loan') {
             highlightRowRange(table, 0, 0, 7, 'bg-dark-blue-highlight'); // ردیف 1 تا H
             highlightRowRange(table, 2, 0, 7, 'bg-dark-green-highlight'); // ردیف 3 تا H
             highlightRowRange(table, 3, 0, 7, 'bg-dark-green-highlight'); // ردیف 4 تا H
-            hideColumnsFrom(table, 8); // ستون I (ایندکس 8) به بعد مخفی
+            hideColumnsFrom(table, 8); // فقط نمایش تا ستون H (ستون 0 تا 7). ستون I (ایندکس 8) به بعد مخفی
         }
         else if (sheetName === 'temp2') {
             highlightRowRange(table, 0, 0, 5, 'bg-dark-green-highlight'); // ردیف 1 تا F
-            hideColumnsFrom(table, 6); // ستون G (ایندکس 6) به بعد مخفی
+            hideColumnsFrom(table, 6); // فقط نمایش تا ستون F (ستون 0 تا 5). ستون G (ایندکس 6) به بعد مخفی
         }
     }
 
