@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پنل گزارش‌گیری</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <style>
+        :root { --primary: #217346; }
+
+        body { font-family: Tahoma, sans-serif; background:#f4f7f6; margin:0; padding:15px; direction: rtl; }
+        .container { max-width:1200px; margin:0 auto; background:white; padding:15px; border-radius:10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+
+        .header-bar{
+            padding:10px;
+            background:#e9ecef;
+            border-right:5px solid var(--primary);
+            margin-bottom:15px;
+            display:block;
+            line-height:1.8;
+        }
+
+        .nav-bar{display:flex;gap:10px;margin-bottom:20px;border-bottom:2px solid var(--primary);padding-bottom:10px;flex-wrap: wrap;}
+        .tab-btn{padding:10px 20px;border:none;background:#ddd;border-radius:5px;font-weight:bold;cursor:pointer}
+        .tab-btn.active{background:var(--primary);color:white}
+
+        .table-container { overflow-x: auto; }
+        table{width:100%;border-collapse:collapse;margin-top: 10px;}
+        th,td{border:1px solid #ddd;padding:8px;text-align:center;white-space: nowrap;}
+        
+        .open-sheet-btn{ background:#217346;color:white;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-family: Tahoma;font-size: 12px; }
+        .open-sheet-btn:hover{ background:#1a5c38; }
+
+        .bg-blue-dark { background-color: #004085 !important; color: white !important; font-weight: bold; }
+        .bg-blue-light { background-color: #cce5ff !important; }
+        .bg-green-dark { background-color: #155724 !important; color: white !important; font-weight: bold; }
+        .bg-green-light { background-color: #d4edda !important; }
+        .bg-yellow-dark { background-color: #ffc107 !important; font-weight: bold; }
+
+        .row-blue { background-color: #e6f2ff !important; }
+        .row-orange { background-color: #fff2e6 !important; }
+    </style>
+</head>
+
+<body>
+<div class="container">
+
+    <div id="status">در حال بارگذاری اطلاعات...</div>
+
+    <div id="info-header" class="header-bar" style="display:none;">
+        <div id="msg-line1"></div>
+        <div id="msg-line2"></div>
+    </div>
+
+    <div id="tabs-container" class="nav-bar" style="display:none;"></div>
+
+    <div id="back-area"></div>
+
+    <div class="table-container" id="content-viewer"></div>
+</div>
+
+<script>
+    const EXCEL_FILE = "data.xlsm";
+    const MAIN_SHEETS = ["member","bank","cash","loan","temp2"];
+
+    let workbook = null;
+    let date = "";
+    let we = "";
+
+    function colLetterToIndex(letter) {
+        letter = letter.toUpperCase();
+        let column = 0;
+        for(let i=0;i<letter.length;i++){
+            column += (letter.charCodeAt(i)-64)*Math.pow(26,letter.length-i-1);
+        }
+        return column - 1;
+    }
+
+    function getCell(table, addr) {
+        const m = addr.match(/^([A-Z]+)([0-9]+)$/i);
+        if(!m) return null;
+        const col = colLetterToIndex(m[1]);
+        const row = parseInt(m[2]) - 1;
+        if(table.rows[row] && table.rows[row].cells[col]) return table.rows[row].cells[col];
+        return null;
+    }
+
+    function colorRange(table, rangeStr, className) {
+        const parts = rangeStr.split(":");
+        const m1 = parts[0].match(/^([A-Z]+)([0-9]+)$/i);
+        const m2 = parts[1].match(/^([A-Z]+)([0-9]+)$/i);
+
+        if(!m1 || !m2) return;
+
+        const sCol = colLetterToIndex(m1[1]);
+        const sRow = parseInt(m1[2]) - 1;
+        const eCol = colLetterToIndex(m2[1]);
+        const eRow = parseInt(m2[2]) - 1;
+
+        for(let r=sRow; r<=eRow; r++){
+            if(!table.rows[r]) continue;
+            for(let c=sCol; c<=eCol; c++){
+                if(table.rows[r].cells[c]) table.rows[r].cells[c].className = className;
+            }
+        }
+    }
+
+    function colorRowToColumn(table, rowNum, maxColLetter, className) {
+        const row = table.rows[rowNum-1];
+        if(!row) return;
+        const maxCol = colLetterToIndex(maxColLetter);
+        for(let c=0;c<=maxCol;c++){
+            if(row.cells[c]) row.cells[c].className = className;
+        }
+    }
+
+    function colorCells(table, cellsArray, className) {
+        cellsArray.forEach(addr=>{
+            const cell=getCell(table,addr);
+            if(cell) cell.className = className;
+        });
+    }
+
+    async function init(){
+        try{
+            const res = await fetch(EXCEL_FILE);
+            if(!res.ok) throw new Error("فایل اکسل یافت نشد یا دسترسی مجاز نیست.");
+            
+            const data = await res.arrayBuffer();
+            workbook = XLSX.read(data,{type:"array"});
+            calculateUpdateDate();
+            extractWeVar();
+            updateHeaders();
+            document.getElementById("status").style.display="none";
+            document.getElementById("info-header").style.display="block";
+            document.getElementById("tabs-container").style.display="flex";
+            renderMainTabs();
+            loadSheet("member");
+        }catch(e){
+            console.error(e);
+            document.getElementById("status").innerText="خطا در بارگذاری فایل: " + e.message;
+        }
+    }
+
+    // اصلاحیه دقیق: پیدا کردن بزرگترین مقدار ستون D از ردیف ۹ به بعد
+    function calculateUpdateDate(){
+        const sh = workbook.Sheets["bank"];
+        if(!sh || !sh["!ref"]) return;
+        const range = XLSX.utils.decode_range(sh["!ref"]);
+        let mx = "";
+        
+        // ردیف 9 اکسل معادل ایندکس 8 در شیء رنج است (range.s.r را نادیده گرفته و از 8 شروع می‌کنیم)
+        let startRow = Math.max(8, range.s.r); 
+        
+        for(let r = startRow; r <= range.e.r; r++){
+            const cell = sh[XLSX.utils.encode_cell({r:r,c:3})]; // ستون D (ایندکس 3)
+            if(cell) {
+                // استفاده از cell.v یا cell.w برای اطمینان از خوانده شدن دیتا
+                let val = (cell.v !== undefined ? String(cell.v) : (cell.w ? cell.w : "")).trim();
+                if(val && val > mx) mx = val;
+            }
+        }
+        date = mx;
+    }
+
+    // اصلاحیه دقیق: دریافت مقدار مستقیم سلول G1 از شیت temp2
+    function extractWeVar(){
+        const sh = workbook.Sheets["temp2"];
+        if(sh && sh["G1"]) {
+            we = (sh["G1"].v !== undefined ? String(sh["G1"].v) : (sh["G1"].w ? sh["G1"].w : "")).trim();
+        } else {
+            we = "";
+        }
+    }
+
+    function updateHeaders(){
+        document.getElementById("msg-line1").innerText =
+            `آخرین به روزرسانی: ${date} اگر هر تراکنشی بعد از تاریخ بروزرسانی باشد در آپدیت بعدی لحاظ می شود`;
+
+        document.getElementById("msg-line2").innerText =
+            `محاسبات امتیاز وام در روز ${we} انجام شده است`;
+    }
+
+    function renderMainTabs(){
+        const bar=document.getElementById("tabs-container");
+        bar.innerHTML = "";
+        MAIN_SHEETS.forEach(n=>{
+            const b=document.createElement("button");
+            b.className="tab-btn";
+            b.id="btn-"+n;
+            b.innerText=n.toUpperCase();
+            b.onclick=()=>loadSheet(n);
+            bar.appendChild(b);
+        });
+    }
+
+    function applyAlternatingHighlight(table,startRowIndex){
+        let isBlue=true;
+        for(let i=startRowIndex;i<table.rows.length;i++){
+            const row=table.rows[i];
+            let hasData=false;
+            for(let c=0;c<row.cells.length;c++){
+                if(row.cells[c].innerText.trim()!==""){hasData=true;break;}
+            }
+            if(!hasData) continue;
+
+            let hasCustom=false;
+            for(let c=0;c<row.cells.length;c++){
+                const cl=row.cells[c].classList;
+                if(cl.contains("bg-blue-dark")||cl.contains("bg-blue-light")||
+                   cl.contains("bg-green-dark")||cl.contains("bg-green-light")||
+                   cl.contains("bg-yellow-dark")){hasCustom=true;break;}
+            }
+            if(hasCustom) continue;
+
+            for(let c=0;c<row.cells.length;c++){
+                row.cells[c].classList.add(isBlue?"row-blue":"row-orange");
+            }
+            isBlue=!isBlue;
+        }
+    }
+
+    function loadSheet(sheetName){
+        const ws = workbook.Sheets[sheetName];
+        if(!ws) {
+            document.getElementById("content-viewer").innerHTML = "<p style='padding:15px;color:red;'>شیت مورد نظر یافت نشد.</p>";
+            return;
+        }
+
+        const sheetNum = parseInt(sheetName);
+        const isNumericSheet = !isNaN(sheetNum) && sheetNum>=11 && sheetNum<=35;
+
+        document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+        if(document.getElementById("btn-"+sheetName)) document.getElementById("btn-"+sheetName).classList.add("active");
+
+        document.getElementById("back-area").innerHTML =
+            sheetName!=="member"
+            ? `<button class="open-sheet-btn" style="margin-bottom:15px;" onclick="loadSheet('member')">بازگشت به MEMBER</button>` 
+            : "";
+
+        const html = XLSX.utils.sheet_to_html(ws);
+        document.getElementById("content-viewer").innerHTML = html;
+
+        const table = document.querySelector("#content-viewer table");
+        if(!table) return;
+
+        if(sheetName==="member"){
+            hideColumnsFrom(table,9);
+            colorRowToColumn(table,1,"I","bg-blue-dark");
+            colorRowToColumn(table,3,"I","bg-green-dark");
+            addHyperLinkButtonsMember(table);
+            applyAlternatingHighlight(table,3);
+        }
+        else if(sheetName==="bank"){
+            hideColumnsFrom(table,7);
+            colorRowToColumn(table,1,"G","bg-blue-dark");
+            colorRowToColumn(table,7,"G","bg-green-dark");
+            colorRowToColumn(table,8,"G","bg-green-dark");
+            colorCells(table,["B4","C4","E4","F4"],"bg-yellow-dark");
+            colorCells(table,["B5","C5","E5","F5"],"bg-green-light");
+            applyAlternatingHighlight(table,8);
+        }
+        else if(sheetName==="cash"){
+            hideColumnsFrom(table,7);
+            colorRowToColumn(table,1,"G","bg-blue-dark");
+            colorRowToColumn(table,5,"G","bg-green-dark");
+            colorRowToColumn(table,6,"G","bg-green-dark");
+            colorCells(table,["B3"],"bg-yellow-dark");
+            colorCells(table,["C3"],"bg-green-light");
+            applyAlternatingHighlight(table,6);
+        }
+        else if(sheetName==="loan"){
+            hideColumnsFrom(table,8);
+            colorRowToColumn(table,1,"H","bg-blue-dark");
+            colorRowToColumn(table,3,"H","bg-green-dark");
+            colorRowToColumn(table,4,"H","bg-green-dark");
+            applyAlternatingHighlight(table,4);
+        }
+        else if(sheetName==="temp2"){
+            hideColumnsFrom(table,6);
+            colorRowToColumn(table,1,"F","bg-green-dark");
+            applyAlternatingHighlight(table,1);
+        }
+        /* --- تغییرات دقیق شیت‌های عددی ۱۱ تا ۳۵ --- */
+        else if(isNumericSheet){
+            // اصلاحیه: تا ستون G (ایندکس 7) نمایش داده شود و ستون‌های بعد از آن مخفی شوند
+            hideColumnsFrom(table, 7);
+            
+            // ردیف‌های ۱ تا ۴ از ستون A تا G آبی کم‌رنگ می‌شوند
+            colorRange(table, "A1:G4", "bg-blue-light");
+            
+            // سپس سلول‌های B1، D1 و F1 آبی پررنگ می‌شوند
+            colorCells(table, ["B1", "D1", "F1"], "bg-blue-dark");
+            
+            // اعمال استایل یک‌درمیان برای ردیف‌های بعد از ردیف ۴ (شروع از ایندکس ۴)
+            applyAlternatingHighlight(table, 4);
+        }
+    }
+
+    function hideColumnsFrom(table,start){
+        for(let r=0;r<table.rows.length;r++){
+            for(let c=start;c<table.rows[r].cells.length;c++){
+                table.rows[r].cells[c].style.display="none";
+            }
+        }
+    }
+
+    function addHyperLinkButtonsMember(table){
+        for(let r=3; r<table.rows.length; r++){
+            const row=table.rows[r];
+            if(!row || !row.cells[1]) continue;
+            
+            const code=row.cells[1].innerText.trim();
+            if(!code) continue;
+            
+            const btn=document.createElement("button");
+            btn.className="open-sheet-btn";
+            btn.innerText="ورود";
+            btn.onclick=()=>loadSheet(code);
+            
+            if(row.cells[0]) {
+                row.cells[0].innerHTML="";
+                row.cells[0].appendChild(btn);
+            }
+        }
+    }
+
+    init();
+</script>
+
+</body>
+</html>
