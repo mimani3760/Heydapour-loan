@@ -44,6 +44,22 @@
         .bg-dark-blue-highlight { background-color: var(--dark-blue-hl) !important; color: var(--text-white) !important; }
         .bg-dark-green-highlight { background-color: var(--dark-green-hl) !important; color: var(--text-white) !important; }
         
+        /* استایل دکمه‌های انتقال به شیت‌های عددی */
+        .open-sheet-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: var(--primary);
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .open-sheet-btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
         .loading { text-align: center; color: #666; padding: 50px; }
         .back-link { display: inline-block; margin-bottom: 15px; padding: 8px 15px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; cursor: pointer; border: none; }
     </style>
@@ -104,7 +120,6 @@
         const range = XLSX.utils.decode_range(sheet['!ref']);
         let maxDate = "";
         
-        // جستجو در ستون D (ایندکس 3) برای پیدا کردن بزرگ‌ترین مقدار تاریخ
         for (let r = range.s.r; r <= range.e.r; r++) {
             const cell = sheet[XLSX.utils.encode_cell({r: r, c: 3})];
             if (cell && cell.w) {
@@ -134,6 +149,8 @@
 
     function renderMainTabs() {
         const container = document.getElementById('tabs-container');
+        container.innerHTML = ""; // ریست کردن تب‌ها
+        
         MAIN_SHEETS.forEach(name => {
             if (workbook.SheetNames.includes(name)) {
                 const btn = document.createElement('button');
@@ -150,14 +167,16 @@
         const worksheet = workbook.Sheets[sheetName];
         if (!worksheet) return;
 
+        // هایلایت کردن تب انتخاب شده (فقط برای تب‌های اصلی)
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('btn-' + sheetName).classList.add('active');
+        const tabBtn = document.getElementById('btn-' + sheetName);
+        if (tabBtn) tabBtn.classList.add('active');
 
-        // دکمه بازگشت
+        // دکمه بازگشت (اگر شیت عددی یا غیر از member باز شده باشد)
         const backArea = document.getElementById('back-area');
-        backArea.innerHTML = sheetName !== 'member' ? `<button class="back-link" onclick="loadSheet('member')">⬅ بازگشت</button>` : '';
+        backArea.innerHTML = sheetName !== 'member' ? `<button class="back-link" onclick="loadSheet('member')">⬅ بازگشت به MEMBER</button>` : '';
 
-        // نمایش جدول
+        // نمایش جدول خام
         let html = XLSX.utils.sheet_to_html(worksheet);
         document.getElementById('content-viewer').innerHTML = html;
         const table = document.querySelector("#content-viewer table");
@@ -166,33 +185,36 @@
         if (sheetName === 'member') {
             highlightRowRange(table, 0, 0, 4, 'bg-dark-blue-highlight'); // ردیف 1 تا E
             highlightRowRange(table, 2, 0, 4, 'bg-dark-green-highlight'); // ردیف 3 تا E
-            hideColumnsFrom(table, 5); // فقط نمایش تا ستون E (ستون 0 تا 4). ستون F (ایندکس 5) به بعد مخفی
+            hideColumnsFrom(table, 5); // مخفی‌سازی ستون‌های F به بعد (ایندکس 5 به بعد)
+            
+            // تولید دکمه‌های عملیات برای کدهای 11 تا 35
+            addMemberRowButtons(table);
         } 
         else if (sheetName === 'bank') {
             highlightRowRange(table, 0, 0, 6, 'bg-dark-blue-highlight'); // ردیف 1 تا G
             highlightRowRange(table, 6, 0, 6, 'bg-dark-green-highlight'); // ردیف 7 تا G
             highlightRowRange(table, 7, 0, 6, 'bg-dark-green-highlight'); // ردیف 8 تا G
-            hideColumnsFrom(table, 7); // فقط نمایش تا ستون G (ستون 0 تا 6). ستون H (ایندکس 7) به بعد مخفی
+            hideColumnsFrom(table, 7); // مخفی‌سازی ستون‌های H به بعد (ایندکس 7 به بعد)
         } 
         else if (sheetName === 'cash') {
             highlightRowRange(table, 0, 0, 6, 'bg-dark-blue-highlight'); // ردیف 1 تا G
             highlightRowRange(table, 4, 0, 6, 'bg-dark-green-highlight'); // ردیف 5 تا G
             highlightRowRange(table, 5, 0, 6, 'bg-dark-green-highlight'); // ردیف 6 تا G
-            hideColumnsFrom(table, 7); // فقط نمایش تا ستون G (ستون 0 تا 6). ستون H (ایندکس 7) به بعد مخفی
+            hideColumnsFrom(table, 7); // مخفی‌سازی ستون‌های H به بعد (ایندکس 7 به بعد)
         } 
         else if (sheetName === 'loan') {
             highlightRowRange(table, 0, 0, 7, 'bg-dark-blue-highlight'); // ردیف 1 تا H
             highlightRowRange(table, 2, 0, 7, 'bg-dark-green-highlight'); // ردیف 3 تا H
             highlightRowRange(table, 3, 0, 7, 'bg-dark-green-highlight'); // ردیف 4 تا H
-            hideColumnsFrom(table, 8); // فقط نمایش تا ستون H (ستون 0 تا 7). ستون I (ایندکس 8) به بعد مخفی
+            hideColumnsFrom(table, 8); // مخفی‌سازی ستون‌های I به بعد (ایندکس 8 به بعد)
         }
         else if (sheetName === 'temp2') {
             highlightRowRange(table, 0, 0, 5, 'bg-dark-green-highlight'); // ردیف 1 تا F
-            hideColumnsFrom(table, 6); // فقط نمایش تا ستون F (ستون 0 تا 5). ستون G (ایندکس 6) به بعد مخفی
+            hideColumnsFrom(table, 6); // مخفی‌سازی ستون‌های G به بعد (ایندکس 6 به بعد)
         }
     }
 
-    // توابع کمکی
+    // توابع کمکی هایلایت و مخفی سازی
     function highlightRowRange(table, rIdx, startC, endC, cls) {
         if (!table.rows[rIdx]) return;
         for (let c = startC; c <= endC; c++) {
@@ -206,6 +228,74 @@
                 if (table.rows[r].cells[c]) table.rows[r].cells[c].style.display = 'none';
             }
         }
+    }
+
+    // تابع افزودن ستون دکمه‌ها به انتهای هر ردیف شیت member
+    function addMemberRowButtons(table) {
+        if (!table) return;
+        const headerRow = table.rows[0];
+        if (!headerRow) return;
+
+        // بررسی جهت جلوگیری از ایجاد ستون تکراری
+        if (headerRow.cells[0] && headerRow.cells[0].dataset && headerRow.cells[0].dataset.actionCol === "1") {
+            return;
+        }
+
+        // ایجاد ستون جدید عملیات در سمت راست جدول (اولین ستون در RTL)
+        const th = document.createElement('th');
+        th.innerText = "عملیات شیت";
+        th.dataset.actionCol = "1";
+        headerRow.insertBefore(th, headerRow.cells[0] || null);
+
+        // پیمایش ردیف‌ها برای درج دکمه در صورت تطابق کد
+        for (let r = 1; r < table.rows.length; r++) {
+            const row = table.rows[r];
+            const code = findCodeInRow(row);
+            const td = document.createElement('td');
+
+            if (code !== null) {
+                const targetSheet = String(code);
+                const btn = document.createElement('button');
+                btn.className = "open-sheet-btn";
+                btn.type = "button";
+                btn.innerText = `نمایش شیت ${targetSheet}`;
+
+                // غیرفعال کردن دکمه در صورت موجود نبودن شیت مورد نظر
+                if (!workbook || !workbook.SheetNames.includes(targetSheet)) {
+                    btn.disabled = true;
+                    btn.title = `شیت شماره ${targetSheet} در این فایل یافت نشد.`;
+                } else {
+                    btn.onclick = () => loadSheet(targetSheet);
+                }
+                td.appendChild(btn);
+            } else {
+                td.innerHTML = "-";
+            }
+            row.insertBefore(td, row.cells[0] || null);
+        }
+    }
+
+    // استخراج شماره شیت (کدهای بین 11 تا 35) از ردیف
+    function findCodeInRow(row) {
+        if (!row || !row.cells) return null;
+        
+        // از آنجا که ستون F به بعد مخفی شده، ما فقط ستون‌های اولیه (A تا E) را جستجو می‌کنیم
+        for (let c = 0; c < row.cells.length; c++) {
+            const textVal = (row.cells[c].innerText || "").trim();
+            
+            // اگر سلول فقط شامل عدد خالص بود
+            if (/^\d+$/.test(textVal)) {
+                const num = parseInt(textVal, 10);
+                if (num >= 11 && num <= 35) return num;
+            }
+            
+            // اگر عدد داخل عبارات متنی بود (مثال: "کد 24" یا "عضو 15")
+            const match = textVal.match(/\b(1[1-9]|2[0-9]|3[0-5])\b/);
+            if (match) {
+                return parseInt(match[1], 10);
+            }
+        }
+        return null;
     }
 
     init();
